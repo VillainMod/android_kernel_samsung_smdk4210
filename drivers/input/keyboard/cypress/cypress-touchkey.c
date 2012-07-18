@@ -1664,6 +1664,74 @@ static DEVICE_ATTR(autocal_enable, S_IRUGO | S_IWUSR | S_IWGRP, NULL,
 static DEVICE_ATTR(autocal_stat, S_IRUGO | S_IWUSR | S_IWGRP,
 		   autocalibration_status, NULL);
 #endif				/* CONFIG_TARGET_LOCALE_NA */
+
+static ssize_t led_timeout_read( struct device *dev, struct device_attribute *attr, char *buf )
+{
+	return sprintf(buf,"%d\n", led_timeout);
+}
+
+static ssize_t led_timeout_write( struct device *dev, struct device_attribute *attr, const char *buf, size_t size )
+{
+	sscanf(buf,"%d\n", &led_timeout);
+
+	if (!led_disabled) {
+		if (led_timeout>0) {
+	                /* start timer; it's fine if light is already off */
+	                mod_timer(&led_timer, jiffies + (HZ*led_timeout));
+		} else {
+			/* time is never so ensure light is on */
+			do_touch_led_control(1);
+		}
+	}
+
+	return size;
+}
+
+static void bl_off(struct work_struct *bl_off_work)
+{
+	/* we have timed out, turn the lights off */
+	/* but only if led_timeout is still non-zero */
+	if (led_timeout>0) {
+		do_touch_led_control(2);
+	}
+
+	return;
+}
+
+static void handle_led_timeout(unsigned long data)
+{
+	/* we cannot call the timeout directly as it causes a kernel spinlock BUG, schedule it instead */
+	schedule_work(&bl_off_work);
+}
+
+static DEVICE_ATTR(led_timeout, S_IRUGO | S_IWUSR | S_IWGRP, led_timeout_read, led_timeout_write);
+
+static ssize_t force_disable_read( struct device *dev, struct device_attribute *attr, char *buf )
+{
+	return sprintf(buf,"%d\n", led_disabled);
+}
+
+static ssize_t force_disable_write( struct device *dev, struct device_attribute *attr, const char *buf, size_t size )
+{
+	int newstate;
+	if (sscanf(buf,"%d\n", &newstate) !=1 ) {
+		return size;
+	}
+
+	/* change light state if needed*/
+	if (newstate == 1 && led_disabled == 0) {
+		do_touch_led_control(2);
+		led_disabled=newstate;
+	} else if (newstate == 0 && led_disabled == 1) {
+		led_disabled=0;
+		do_touch_led_control(1);
+	}
+
+	return size;
+}
+
+static DEVICE_ATTR(force_disable, S_IRUGO | S_IWUSR | S_IWGRP, force_disable_read, force_disable_write);
+
 static int __init touchkey_init(void)
 {
 	int ret = 0;
